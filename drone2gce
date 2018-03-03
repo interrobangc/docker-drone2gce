@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+source "env_settings"
+
+if [ "$?" != "0" ]; then
+    echo "you must have a valid env_settings file mounted in /app/env_settings"
+    exit 1
+fi
+
+# setup reserved ip for drone
+gcloud_drone_ip=$(gcloud compute addresses list | grep -E "^drone-ip\s" | awk '{print $2}')
+
+if [ "$gcloud_drone_ip" = "" ]; then
+    echo "Could not find reserved ip drone-ip, creating it..."
+    gcloud compute addresses create drone-ip --global
+    gcloud_drone_ip=$(gcloud compute addresses list | grep -E "^drone-ip\s" | awk '{print $2}')
+
+else
+    echo "Found reserved ip drone-ip"
+fi
+
+ssl_name="star.$domain"
+export ssl_name=${ssl_name//./-}
+
+gcloud compute ssl-certificates list | grep -E "^${ssl_name}\s" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Found ssl cert ${ssl_name}."
+else
+    echo "Creating ssl cert ${ssl_name}..."
+
+    echo "Generating self-signed certificate"
+
+    mkdir ssl
+    cd ssl
+
+    openssl genrsa -des3 -passout pass:x -out key.pem 2048
+
+    cp key.pem key.pem.orig
+
+    openssl rsa -passin pass:x -in key.pem.orig -out key.pem
+
+    openssl req -new -key key.pem -out cert.csr -subj "/C=${ssl_c:-US}/ST=${ssl_st:-NC}/L=${ssl_l:-Mars Hill}/O=${ssl_o:-Interrobang Consulting}/OU=${ssl_ou:-staging}/CN=*.${ssl_cn:-interrobang.consulting}"
+
+    openssl x509 -req -days ${SSL_DAYS:-3650} -in cert.csr -signkey key.pem -out cert.pem
+
+    cd ..
+
+    gcloud compute ssl-certificates create \
+        ${ssl_name} \
+        --certificate=ssl/cert.pem \
+        --private-key=ssl/key.pem
+fi
+
+# create kubernetes cluster
+cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
+
+if [ "$cluster_ip" = "" ]; then
+    echo "Could not find cluster ${name}, creating it..."
+    gcloud container clusters create \
+        ${name} \
+        --zone ${zone} \
+        --machine-type ${machine_type} \
+        --num-nodes ${num_nodes}
+        # --additional-zones ${additional_zones} \
+else
+    echo "Found cluster ${name}."
+fi
+
+
+case "$drone_database_drive" in
+    sqlite3)
+        ./setup_sqlite_volume
+        ;;
+
+    mysql)
+        ./setup_sql_instance
+        ;;
+esac
+
+# deploy drone to kubernetes cluster
+gcloud container clusters get-credentials ${name} --zone ${zone} --project ${project}
+
+# base64 encode secret variables
+# busybox base64 doesn't support -w0 flag so we have to manually strip newlines
+base64_drone_github_client=$(echo ${drone_github_client} | base64)
+export base64_drone_github_client=${base64_drone_github_client//$'\n'/}
+
+base64_drone_github_secret=$(echo ${drone_github_secret} | base64)
+export base64_drone_github_secret=${base64_drone_github_secret//$'\n'/}
+
+base64_drone_secret=$(echo ${drone_secret} | base64)
+export base64_drone_secret=${base64_drone_secret//$'\n'/}
+
+base64_drone_database_source=$(echo "${drone_db_user}:${drone_db_pass}@tcp(${drone_db_host}:3306)/drone?parseTime=true" | base64)
+export base64_drone_database_source=${base64_drone_database_source//$'\n'/}
+
+
+for filename in k8s_templates/*; do
+    cat ${filename} | envsubst > k8s/$(basename ${filename})
+done
+
+kubectl apply -f ./k8s

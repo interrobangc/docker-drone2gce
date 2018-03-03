@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+export name="staging"
+export zone="us-east1-b"
+export additional_zones="us-east1-c,us-east1-d"
+export machine_type="f1-micro"
+export num_nodes="1"
+export project="interrobangc"
+
+export drone_github_client=""
+export drone_github_secret=""
+export drone_secret""
+export drone_db_user=""
+export drone_db_pass=""

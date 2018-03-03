@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+gcloud compute disks list | grep -E "^drone-sqlite-db\s" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Found disk drone-sqlite-db"
+else
+    echo "Could not find disk drone-sqlite-db, creating it..."
+    gcloud compute disks create \
+        drone-sqlite-db \
+        --zone ${zone} \
+        --size 5GB
+fi
