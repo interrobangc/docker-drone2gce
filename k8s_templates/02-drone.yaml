@@ -17,6 +17,8 @@ spec:
         - name: drone
           image: drone/drone:${drone_tag}
           env:
+            - name: DRONE_SERVER_ADDR
+              value: ":80"
             - name: DRONE_OPEN
               value: "${drone_open}"
             - name: DRONE_ADMIN
@@ -40,22 +42,16 @@ spec:
                 secretKeyRef:
                   name: drone
                   key: drone-secret
-            # - name: DRONE_DATABASE_DRIVER
-            #   value: "mysql"
-            # - name: DRONE_DATABASE_DATASOURCE
-            #   valueFrom:
-            #     secretKeyRef:
-            #       name: drone
-            #       key: drone-database-source
+            - name: DRONE_DATABASE_DRIVER
+              value: ${drone_database_drive}
+            - name: DRONE_DATABASE_DATASOURCE
+              valueFrom:
+                secretKeyRef:
+                  name: drone
+                  key: drone-database-source
           ports:
-            - containerPort: 80
-              name: drone-http-port
-            - containerPort: 9000
-          volumeMounts:
-            - name: drone-sqlite-db
-              mountPath: /var/lib/drone
-      volumes:
-        - name: drone-sqlite-db
-          gcePersistentDisk:
-            pdName:  drone-sqlite-db
-            fsType: ext4
+            - name: http
+              containerPort: 80
+            - name: agent
+              containerPort: 9000
+${sqlite_volume_partial}

@@ -4,9 +4,9 @@ metadata:
   annotations:
     ingress.gcp.kubernetes.io/pre-shared-cert: ${ssl_name}
     ingress.kubernetes.io/force-ssl-redirect: "true"
-    # kubernetes.io/ingress.allow-http: "false"
+    kubernetes.io/ingress.allow-http: "false"
     kubernetes.io/ingress.global-static-ip-name: drone-ip
-  name: drone
+  name: drone-ingress
   namespace: drone
 spec:
   rules:
@@ -14,5 +14,5 @@ spec:
       http:
         paths:
           - backend:
-              serviceName: drone
-              servicePort: 80
+              serviceName: drone-svc
+              servicePort: drone-http

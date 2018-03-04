@@ -1,0 +1,8 @@
+          volumeMounts:
+            - name: drone-sqlite-db
+              mountPath: /var/lib/drone
+      volumes:
+        - name: drone-sqlite-db
+          gcePersistentDisk:
+            pdName:  drone-sqlite-db
+            fsType: ext4

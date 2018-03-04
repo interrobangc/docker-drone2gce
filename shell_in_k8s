@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+kubectl apply -f shell.yaml
+
+sleep 3
+
+kubectl --namespace=drone exec -it shell  -- bash

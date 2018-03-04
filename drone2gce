@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 
-source "env_settings"
+source ".env"
 
 if [ "$?" != "0" ]; then
-    echo "you must have a valid env_settings file mounted in /app/env_settings"
+    echo "you must have a valid env_settings file mounted in /app/.env"
     exit 1
 fi
+
+chmod 600 /app/.env
 
 # setup reserved ip for drone
 gcloud_drone_ip=$(gcloud compute addresses list | grep -E "^drone-ip\s" | awk '{print $2}')
@@ -66,14 +68,17 @@ else
     echo "Found cluster ${name}."
 fi
 
-
+export sqlite_volume_partial=""
 case "$drone_database_drive" in
     sqlite3)
         ./setup_sqlite_volume
+        export sqlite_volume_partial=$(cat k8s_partial/sqlite_volume.yaml)
+        base64_drone_database_source=$(echo -n "/var/lib/drone/drone.sqlite" | base64)
         ;;
 
     mysql)
         ./setup_sql_instance
+        base64_drone_database_source=$(echo -n "${drone_db_user}:${drone_db_pass}@tcp(${drone_db_host}:3306)/drone?parseTime=true" | base64)
         ;;
 esac
 
@@ -82,16 +87,15 @@ gcloud container clusters get-credentials ${name} --zone ${zone} --project ${pro
 
 # base64 encode secret variables
 # busybox base64 doesn't support -w0 flag so we have to manually strip newlines
-base64_drone_github_client=$(echo ${drone_github_client} | base64)
+base64_drone_github_client=$(echo -n ${drone_github_client} | base64)
 export base64_drone_github_client=${base64_drone_github_client//$'\n'/}
 
-base64_drone_github_secret=$(echo ${drone_github_secret} | base64)
+base64_drone_github_secret=$(echo -n ${drone_github_secret} | base64)
 export base64_drone_github_secret=${base64_drone_github_secret//$'\n'/}
 
-base64_drone_secret=$(echo ${drone_secret} | base64)
+base64_drone_secret=$(echo -n ${drone_secret} | base64)
 export base64_drone_secret=${base64_drone_secret//$'\n'/}
 
-base64_drone_database_source=$(echo "${drone_db_user}:${drone_db_pass}@tcp(${drone_db_host}:3306)/drone?parseTime=true" | base64)
 export base64_drone_database_source=${base64_drone_database_source//$'\n'/}
 
 
