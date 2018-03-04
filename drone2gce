@@ -9,6 +9,8 @@ fi
 
 chmod 600 /app/.env
 
+gcloud config set project ${project}
+
 # setup reserved ip for drone
 gcloud_drone_ip=$(gcloud compute addresses list | grep -E "^drone-ip\s" | awk '{print $2}')
 
@@ -54,7 +56,7 @@ else
 fi
 
 # create kubernetes cluster
-cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
+export cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
 
 if [ "$cluster_ip" = "" ]; then
     echo "Could not find cluster ${name}, creating it..."
@@ -64,6 +66,8 @@ if [ "$cluster_ip" = "" ]; then
         --machine-type ${machine_type} \
         --num-nodes ${num_nodes}
         # --additional-zones ${additional_zones} \
+        #
+    export cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
 else
     echo "Found cluster ${name}."
 fi
@@ -71,13 +75,16 @@ fi
 export sqlite_volume_partial=""
 case "$drone_database_drive" in
     sqlite3)
-        ./setup_sqlite_volume
+        # use source so script can write env variables
+        source ./scripts/setup_sqlite_volume
         export sqlite_volume_partial=$(cat k8s_partial/sqlite_volume.yaml)
         base64_drone_database_source=$(echo -n "/var/lib/drone/drone.sqlite" | base64)
         ;;
 
     mysql)
-        ./setup_sql_instance
+        # use source so script can write env variables
+        source ./scripts/setup_sql_instance
+        echo "drone_db_host: $drone_db_host"
         base64_drone_database_source=$(echo -n "${drone_db_user}:${drone_db_pass}@tcp(${drone_db_host}:3306)/drone?parseTime=true" | base64)
         ;;
 esac
@@ -98,9 +105,19 @@ export base64_drone_secret=${base64_drone_secret//$'\n'/}
 
 export base64_drone_database_source=${base64_drone_database_source//$'\n'/}
 
-
 for filename in k8s_templates/*; do
     cat ${filename} | envsubst > k8s/$(basename ${filename})
 done
 
 kubectl apply -f ./k8s
+
+external_ip=$(gcloud compute forwarding-rules list | grep k8s-fws-drone-drone-ingress | awk '{print $2}')
+
+echo "
+
+**********************************
+Setup complete.
+Set up the following in dns:
+drone.${domain} ${external_ip}
+**********************************
+"

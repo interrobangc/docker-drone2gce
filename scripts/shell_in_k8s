@@ -2,6 +2,6 @@
 
 kubectl apply -f shell.yaml
 
-sleep 3
+sleep 5
 
 kubectl --namespace=drone exec -it shell  -- bash

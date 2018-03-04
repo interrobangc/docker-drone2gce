@@ -2,9 +2,15 @@ FROM interrobangc/gcloud
 
 RUN apk add --no-cache \
         gettext \
-        openssl
+        openssl \
+        && \
+    mkdir /app/k8s
 
 COPY drone2gce /usr/bin/drone2gce
-COPY k8s /app/k8s
+COPY k8s_partial /app/k8s_partial
+COPY k8s_templates /app/k8s_templates
+COPY scripts /app/scripts
 
-CMD ["staging2gce"]
+WORKDIR /app
+
+CMD ["drone2gce"]

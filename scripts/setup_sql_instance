@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+# configure sql instance
+export drone_db_host=$(gcloud sql instances list | grep drone-${project} | awk '{print $5}')
+
+# GCE reserves sql names for a LONG time so we add date-time to the name
+if [ "$drone_db_host" = "" ]; then
+    echo "Could not find sql instance drone-${project}, creating it..."
+
+    authorized_networks=$(gcloud compute instances list | grep gke-${name} | awk '{print $5}')
+    authorized_networks="${authorized_networks//$'\n'/'/32,'}/32"
+
+    gcloud sql instances create \
+        drone-${project}-$(date +%Y%m%d%H%M%S) \
+        --region ${region} \
+        --gce-zone ${zone} \
+        --database-version "MYSQL_5_7" \
+        --tier "${drone_sql_tier}" \
+        --storage-type "${drone_sql_storage_type}" \
+        --storage-size "${drone_sql_storage_size}" \
+        --authorized-networks "${authorized_networks}"
+
+    export drone_db_host=$(gcloud sql instances list | grep drone-${project} | awk '{print $5}')
+else
+    echo "Found sql instance drone-${project}."
+fi
+
+export drone_db_instance_name=$(gcloud sql instances list | grep drone-${project} | awk '{print $1}')
+
+gcloud sql users list --instance=${drone_db_instance_name} | grep -E "^${drone_db_user}\s" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Found sql user ${drone_db_user}."
+else
+    echo "Creating sql user ${drone_db_user}..."
+    gcloud sql users create \
+        ${drone_db_user} \
+        "%" \
+        --instance=${drone_db_instance_name} \
+        --password=${drone_db_pass}
+fi
+
+gcloud sql databases list --instance=${drone_db_instance_name} | grep -E "^drone\s" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Found database drone."
+else
+    echo "Creating database drone..."
+    gcloud sql databases create \
+        drone \
+        --instance=${drone_db_instance_name}
+fi
