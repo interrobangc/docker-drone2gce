@@ -1,8 +1,8 @@
 apiVersion: apps/v1beta2
 kind: Deployment
 metadata:
-    name: drone-agent
-    namespace: drone
+  name: drone-agent
+  namespace: drone
 spec:
   selector:
     matchLabels:
@@ -19,7 +19,7 @@ spec:
           args: ["agent"]
           env:
             - name: DRONE_SERVER
-              value: "drone:9000"
+              value: "drone-svc:9000"
             - name: DRONE_SECRET
               valueFrom:
                 secretKeyRef:

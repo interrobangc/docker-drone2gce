@@ -1,4 +1,5 @@
 
-/k8s
+/k8s/*
+/helm/*
 /ssl
 /.env

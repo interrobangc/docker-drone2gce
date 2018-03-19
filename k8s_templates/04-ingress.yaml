@@ -2,15 +2,12 @@ apiVersion: extensions/v1beta1
 kind: Ingress
 metadata:
   annotations:
-    ingress.gcp.kubernetes.io/pre-shared-cert: ${ssl_name}
-    ingress.kubernetes.io/force-ssl-redirect: "true"
-    kubernetes.io/ingress.allow-http: "false"
-    kubernetes.io/ingress.global-static-ip-name: drone-ip
+    kubernetes.io/ingress.class: traefik
   name: drone-ingress
   namespace: drone
 spec:
   rules:
-    - host: "drone.${domain}"
+    - host: "${drone_host}.${domain}"
       http:
         paths:
           - backend:

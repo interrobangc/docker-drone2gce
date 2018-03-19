@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+source ".env"
+
+if [ "$?" != "0" ]; then
+    echo "you must have a valid env_settings file mounted in /app/.env"
+    exit 1
+fi
+
+chmod 600 /app/.env
+
+gcloud config set project ${project}
+
+# create kubernetes cluster
+export cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
+
+if [ "$cluster_ip" = "" ]; then
+    echo "No cluster named ${name} found"
+else
+    echo "Deleting cluster: ${name}"
+    gcloud container clusters delete \
+        ${name} \
+        --zone ${zone} \
+        --quiet
+fi
+
+lb_name=$(gcloud compute forwarding-rules list | grep k8s-fws-drone-drone-ingress | awk '{print $1}')
+
+if [ "$lb_name" = "" ]; then
+    echo "No load balancer found"
+else
+    echo "Deleting load balancer: ${lb_name}"
+    gcloud compute forwarding-rules delete \
+        ${lb_name} \
+        --global \
+        --quiet
+fi
+
+proxy_name=$(gcloud compute target-https-proxies list | grep k8s-tps-drone-drone-ingress | awk '{print $1}')
+
+if [ "$proxy_name" = "" ]; then
+    echo "No proxy found"
+else
+    echo "Deleting proxy: ${proxy_name}"
+    gcloud compute target-https-proxies delete \
+        ${proxy_name} \
+        --quiet
+fi

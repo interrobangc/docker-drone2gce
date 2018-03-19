@@ -1,0 +1,16 @@
+imageTag: 1.5
+replicas: ${num_nodes}
+# loadBalancerIP: drone-ip # ${gcloud_drone_ip}
+
+ssl:
+  enabled: true
+  enforced: true
+  defaultKey: "${base64_ssl_key}"
+  defaultCert: "${base64_ssl_cert}"
+
+dashboard:
+  enabled: true
+  domain: "${traefik_host}.${domain}"
+  auth:
+    basic:
+      ${traefik_user}: ${htpasswd_traefik_pass}
