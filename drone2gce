@@ -196,12 +196,12 @@ echo "
 Drone and Traefik have been deployed
 
 Add the following secrets to drone to use this cluster for deployment:
-kubernetes_server ${drone_master}
+kube_server ${drone_master}
 
-KUBE_TOKEN:
+kube_token:
 ${drone_deploy_token}
 
-KUBE_CA:
+kube_ca:
 ${drone_deploy_cert}
 
 Set up the following in dns:
