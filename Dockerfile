@@ -6,7 +6,7 @@ RUN apk add --no-cache \
         && \
     curl -L https://github.com/drone/drone-cli/releases/download/v0.8.4/drone_linux_amd64.tar.gz | tar zx && \
     mv drone /usr/bin/drone && \
-    mkdir /app/k8s
+    mkdir /app/helm
 
 COPY drone2gce /usr/bin/drone2gce
 COPY k8s_partial /app/k8s_partial

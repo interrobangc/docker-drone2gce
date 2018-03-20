@@ -11,48 +11,6 @@ chmod 600 /app/.env
 
 gcloud config set project ${project}
 
-# # setup reserved ip for drone
-# export gcloud_drone_ip=$(gcloud compute addresses list | grep -E "^drone-ip\s" | awk '{print $2}')
-
-# if [ "$gcloud_drone_ip" = "" ]; then
-#     echo "Could not find reserved ip drone-ip, creating it..."
-#     gcloud compute addresses create drone-ip --global
-#     export gcloud_drone_ip=$(gcloud compute addresses list | grep -E "^drone-ip\s" | awk '{print $2}')
-# else
-#     echo "Found reserved ip drone-ip: ${gcloud_drone_ip}"
-# fi
-
-# ssl_name="star.$domain"
-# export ssl_name=${ssl_name//./-}
-
-# gcloud compute ssl-certificates list | grep -E "^${ssl_name}\s" > /dev/null
-# if [ "$?" = "0" ]; then
-#     echo "Found ssl cert ${ssl_name}."
-# else
-#     echo "Creating ssl cert ${ssl_name}..."
-
-#     echo "Generating self-signed certificate"
-
-#     mkdir ssl
-#     cd ssl
-
-#     openssl genrsa -des3 -passout pass:x -out key.pem 2048
-
-#     cp key.pem key.pem.orig
-
-#     openssl rsa -passin pass:x -in key.pem.orig -out key.pem
-
-#     openssl req -new -key key.pem -out cert.csr -subj "/C=${ssl_c:-US}/ST=${ssl_st:-NC}/L=${ssl_l:-Mars Hill}/O=${ssl_o:-Interrobang Consulting}/OU=${ssl_ou:-staging}/CN=*.${ssl_cn:-interrobang.consulting}"
-
-#     openssl x509 -req -days ${SSL_DAYS:-3650} -in cert.csr -signkey key.pem -out cert.pem
-
-#     cd ..
-
-#     gcloud compute ssl-certificates create \
-#         ${ssl_name} \
-#         --certificate=ssl/cert.pem \
-#         --private-key=ssl/key.pem
-# fi
 
 # create kubernetes cluster
 export cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
@@ -63,41 +21,45 @@ if [ "$cluster_ip" = "" ]; then
         ${name} \
         --zone ${zone} \
         --machine-type ${machine_type} \
-        --num-nodes ${num_nodes}
-        # --additional-zones ${additional_zones} \
-        #
+        --enable-autoscaling \
+        --min-nodes ${min_nodes} \
+        --max-nodes ${max_nodes}
+
     export cluster_ip=$(gcloud container clusters list | grep -E "^${name}\s" | awk '{print $4}')
 else
     echo "Found cluster ${name}."
 fi
 
-export sqlite_volume_partial=""
-case "$drone_database_drive" in
+case "$drone_database_driver" in
     sqlite3)
-        # use source so script can write env variables
-        source ./scripts/setup_sqlite_volume
-        export sqlite_volume_partial=$(cat k8s_partial/sqlite_volume.yaml)
-        base64_drone_database_source=$(echo -n "/var/lib/drone/drone.sqlite" | base64)
+        export drone_database_source="/var/lib/drone/drone.sqlite"
         ;;
 
     mysql)
         # use source so script can write env variables
         source ./scripts/setup_sql_instance
         echo "drone_db_host: $drone_db_host"
-        base64_drone_database_source=$(echo -n "${drone_db_user}:${drone_db_pass}@tcp(${drone_db_host}:3306)/drone?parseTime=true" | base64)
+        export drone_database_source="${drone_db_user}:${drone_db_pass}@tcp(${drone_db_host}:3306)/drone?parseTime=true"
         ;;
 esac
 
-# deploy traefik to kubernetes cluster
+
 gcloud container clusters get-credentials ${name} --zone ${zone} --project ${project}
 
-helm version | grep Server > /dev/null
+
+# deploy traefik to kubernetes cluster
+
+helm version --tiller-connection-timeout 5 | grep Server > /dev/null
 if [ "$?" = "0" ]; then
     echo "Helm is already initialized"
 else
-    echo "Running helm init}..."
+    echo "Running helm init..."
     #TODO: setup security: https://docs.helm.sh/using_helm/#securing-your-helm-installation
     helm init
+
+    #TODO: validate tiller is up before continuing
+    echo "sleep to allow tiller to startup..."
+    sleep 20
 fi
 
 kubectl get clusterrolebinding | grep add-on-cluster-admin > /dev/null
@@ -109,16 +71,17 @@ else
     kubectl create clusterrolebinding add-on-cluster-admin --clusterrole=cluster-admin --serviceaccount=kube-system:default
 fi
 
-external_ip=$(kubectl get svc traefik --namespace kube-system | grep traefik | awk '{print $4}')
+# setup conf variables for traefik
+htpasswd_traefik_pass=$(echo $traefik_pass | htpasswd -in admin | awk -F":" '{print $2}')
+export htpasswd_traefik_pass=${htpasswd_traefik_pass//$'\n'/}
 
-if [ "$external_ip" = "" ]; then
-    echo "Could not find traefik, creating it..."
-    htpasswd_traefik_pass=$(echo $traefik_pass | htpasswd -in admin | awk -F":" '{print $2}')
-    export htpasswd_traefik_pass=${htpasswd_traefik_pass//$'\n'/}
-
+if [ ! -f ssl/cert.pem ] || [ ! -f ssl/key.pem ]; then
     echo "Generating self-signed certificate"
 
-    mkdir ssl
+    if [ ! -d ssl ]; then
+        mkdir ssl
+    fi
+
     cd ssl
 
     openssl genrsa -des3 -passout pass:x -out key.pem 2048
@@ -132,81 +95,100 @@ if [ "$external_ip" = "" ]; then
     openssl x509 -req -days ${SSL_DAYS:-3650} -in cert.csr -signkey key.pem -out cert.pem
 
     cd ..
+fi
 
-    gcloud compute ssl-certificates create \
-        ${ssl_name} \
-        --certificate=ssl/cert.pem \
-        --private-key=ssl/key.pem
+base64_ssl_key=$(cat ssl/key.pem | base64)
+export base64_ssl_key=${base64_ssl_key//$'\n'/}
 
-    base64_ssl_key=$(cat ssl/key.pem | base64)
-    export base64_ssl_key=${base64_ssl_key//$'\n'/}
+base64_ssl_cert=$(cat ssl/cert.pem | base64)
+export base64_ssl_cert=${base64_ssl_cert//$'\n'/}
 
-    base64_ssl_cert=$(cat ssl/cert.pem | base64)
-    export base64_ssl_cert=${base64_ssl_cert//$'\n'/}
+for filename in helm_templates/*; do
+    cat ${filename} | envsubst > helm/$(basename ${filename})
+done
 
-    for filename in helm_templates/*; do
-        cat ${filename} | envsubst > helm/$(basename ${filename})
-    done
+external_ip=$(kubectl get svc traefik --namespace kube-system | grep traefik | awk '{print $4}')
 
-    helm install --namespace kube-system --name traefik --values helm/traefik-helm.yml stable/traefik --wait
+if [ "$external_ip" = "" ]; then
+    echo "Could not find traefik, creating it..."
+    helm install --namespace kube-system --name traefik --values helm/traefik_helm.yml stable/traefik --wait
 
     external_ip=$(kubectl get svc traefik --namespace kube-system | grep traefik | awk '{print $4}')
 else
-    echo "Found traefik with ${external_ip}."
+    echo "Found traefik with ${external_ip}"
+    read -p "Would you like to run upgrade?(y/N)" -n 1 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        helm upgrade --values helm/traefik_helm.yml traefik stable/traefik --wait
+    fi
 fi
 
-# deploy drone to kubernetes cluster
 
-gcloud_email=$(gcloud info | grep Account | grep -oE "\[(.+)\]")
-gcloud_email=${gcloud_email//$'['/}
-gcloud_email=${gcloud_email//$']'/}
+# drone helm is in incubator, add repo
+helm repo list | grep -E "^incubator" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Found helm repo: incubator"
+else
+    echo "Adding helm repo: incubator..."
+    helm repo add incubator http://storage.googleapis.com/kubernetes-charts-incubator
+fi
 
-kubectl create clusterrolebinding drone-deploy-cluster-admin-binding --clusterrole=cluster-admin --user=${gcloud_email}
 
-# base64 encode secret variables
-# busybox base64 doesn't support -w0 flag so we have to manually strip newlines
-base64_drone_github_client=$(echo -n ${drone_github_client} | base64)
-export base64_drone_github_client=${base64_drone_github_client//$'\n'/}
+# use helm charts to deploy drone
+helm ls --all drone | grep -E "^drone" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Found drone helm deployment..."
+    read -p "Would you like to run upgrade?(y/N)" -n 1 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        helm upgrade --values helm/drone_helm.yml drone incubator/drone --wait
+    fi
+else
+    echo "Helm install drone..."
+    helm install --namespace drone --name drone --values helm/drone_helm.yml incubator/drone --wait
+fi
 
-base64_drone_github_secret=$(echo -n ${drone_github_secret} | base64)
-export base64_drone_github_secret=${base64_drone_github_secret//$'\n'/}
 
-base64_drone_secret=$(echo -n ${drone_secret} | base64)
-export base64_drone_secret=${base64_drone_secret//$'\n'/}
+# setup rbac account so drone can deploy to staging cluster
+kubectl --namespace drone get serviceaccount | grep -E "^drone-deploy" > /dev/null
+if [ "$?" = "0" ]; then
+    echo "Service account drone-deploy already created"
+else
+    # have to give current user admin bindings
+    gcloud_email=$(gcloud info | grep Account | grep -oE "\[(.+)\]")
+    gcloud_email=${gcloud_email//$'['/}
+    gcloud_email=${gcloud_email//$']'/}
+    kubectl create clusterrolebinding drone-deploy-cluster-admin-binding --clusterrole=cluster-admin --user=${gcloud_email}
 
-export base64_drone_database_source=${base64_drone_database_source//$'\n'/}
+    kubectl apply -f ./k8s/rbac.yml
 
-for filename in k8s_templates/*; do
-    cat ${filename} | envsubst > k8s/$(basename ${filename})
-done
+    # can remove admin bindings for current user after rbac is configured
+    kubectl delete clusterrolebinding drone-deploy-cluster-admin-binding
+fi
 
-kubectl apply -f ./k8s
 
-kubectl delete clusterrolebinding drone-deploy-cluster-admin-binding
-
+# gather information for drone secrets
 drone_deploy_token_name=$(kubectl -n drone get secrets | grep drone-deploy-token | awk '{print $1}')
 
-drone_master=$(kubectl cluster-info | grep "Kubernetes master" | awk '{print $6}')
-drone_deploy_cert=$(kubectl -n drone get secret/${drone_deploy_token_name} -o yaml | grep -oE 'ca.crt: (.+)' | awk '{print $2}')
-drone_deploy_token=$(kubectl -n drone get secret/${drone_deploy_token_name} -o yaml | grep -oE 'token: (.+)' | awk '{print $2}')
+kube_server=$(kubectl cluster-info | grep "Kubernetes master" | awk '{print $6}')
+kube_ca=$(kubectl -n drone get secret/${drone_deploy_token_name} -o yaml | grep -oE 'ca.crt: (.+)' | awk '{print $2}')
+kube_token=$(kubectl -n drone get secret/${drone_deploy_token_name} -o yaml | grep -oE 'token: (.+)' | awk '{print $2}')
 
 echo "
 
 **********************************
-Drone and Traefik have been deployed
+Drone and Traefik have been deployed.
 
 Add the following secrets to drone to use this cluster for deployment:
-kube_server ${drone_master}
+kube_server ${kube_server}
 
 kube_token:
-${drone_deploy_token}
+${kube_token}
 
 kube_ca:
-${drone_deploy_cert}
+${kube_ca}
 
 Set up the following in dns:
-${drone_host}.${domain} ${external_ip}
-${traefik_host}.${domain} ${external_ip}
+${traefik_host}.${domain}  A      ${external_ip}
+${drone_host}.${domain}    CNAME  ${traefik_host}.${domain}
 
 **********************************
 "
