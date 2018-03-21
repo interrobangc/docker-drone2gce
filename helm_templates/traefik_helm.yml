@@ -1,5 +1,5 @@
 imageTag: 1.5
-replicas: ${num_nodes}
+replicas: ${min_nodes}
 # loadBalancerIP: drone-ip # ${gcloud_drone_ip}
 
 ssl:
