@@ -9,8 +9,8 @@ RUN apk add --no-cache \
     mkdir /app/helm
 
 COPY drone2gce /usr/bin/drone2gce
-COPY k8s_partial /app/k8s_partial
-COPY k8s_templates /app/k8s_templates
+COPY k8s /app/k8s
+COPY helm_templates /app/helm_templates
 COPY scripts /app/scripts
 
 WORKDIR /app
